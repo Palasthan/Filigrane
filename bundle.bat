@@ -1,0 +1,1 @@
+pyinstaller --windowed --icon=.\img\filig.ico --add-data=".\img\default_watermark.png;img" --add-data=".\img\filig.ico;img" .\filigrane.pyw
