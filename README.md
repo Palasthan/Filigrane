@@ -1,26 +1,16 @@
-# watermark
-Python script to add a watermark or logo to images
+![Filigrane png](img/default_watermark.png)
 
-### Requirements
-Pillow:
-```
-pip install pillow
-```
+Filigrane is an software that allows you to put a watermark on a set of images. Filigrane is made with python3 and a Tkinter GUI
+# Installation : 
+## For users (Windows only):
+* Download latest release on https://github.com/Palasthan/Filigrane/releases
+* Unzip Filigrane.zip
+* Execute filigrane.exe
 
-[Pillow Docs](https://python-pillow.github.io/)
+## For developers :
+* Clone/Fork directory
+* ``` pip install Pillow ```
+* Execute filigrane.pyw with python3
 
-### Usage
-This script allows you to add a watermark or logo to images in a specified folder. The script takes three arguments:
 
-1. The folder with the images you want to watermark
-2. The path of the logo to add
-3. The float value for the alpha value on the logo
-4. The position you want to place the logo (optional)
-
-The final value for the alpha float will depend on the current value for each pixel, will be proportional.
-Must introduce a number between 0 and 1 
-
-> will default to 0.5
-
-```
-python watermark.py  './images' 'logo.png' 0.4
+![Screenshot png](img/screenshot.png)
