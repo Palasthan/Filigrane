@@ -98,8 +98,8 @@ def filigrane(pathVar, pathOutVar, lgoVar):
                     specialLogo = resizeWatermark(logo, imageWidth/2)
                     image.paste(specialLogo, (int((imageWidth - specialLogo.width)/2), int((imageHeight - specialLogo.height)/2)), specialLogo)
                 
-                image.save(pathOut + '/' + filename)
-                print('Added watermark to ' + path + '/' + filename + ' in ' + pathOut + '/' + filename)
+                image.save(pathOut + '/wm_' + filename)
+                print('Added watermark to ' + path + '/' + filename + ' in ' + pathOut + '/wm_' + filename)
         finishOperations()
     except Exception as e:
         print(traceback.format_exc())

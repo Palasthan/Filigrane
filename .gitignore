@@ -1,0 +1,6 @@
+.DS_Store
+venv
+*.spec
+dist/
+images/
+build/
