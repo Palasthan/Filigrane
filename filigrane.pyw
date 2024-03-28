@@ -1,3 +1,5 @@
+from builtins import int, str
+
 import os
 import traceback
 from tkinter import *
@@ -11,7 +13,7 @@ EXTS = ('.jpg', '.png')
 
 def resize_watermark(prevLogo, wantedWidth):
     wantedHeight = (wantedWidth / prevLogo.width) * prevLogo.height
-    return prevLogo.resize((int(wantedWidth), int(wantedHeight)))
+    return prevLogo.resize((int(wantedWidth * sizeModifier.get()), int(wantedHeight * sizeModifier.get())))
 
 
 def disable_interactions():
@@ -20,6 +22,7 @@ def disable_interactions():
     button_explore_wm["state"] = "disabled"
     button_start["state"] = "disabled"
     opacityScale["state"] = "disabled"
+    sizeModifierScale["state"] = "disabled"
     Tk.update(window)
 
 
@@ -29,6 +32,7 @@ def enable_interactions():
     button_explore_wm["state"] = "normal"
     button_start["state"] = "normal"
     opacityScale["state"] = "normal"
+    sizeModifierScale["state"] = "normal"
     Tk.update(window)
 
 
@@ -36,7 +40,6 @@ def update_progression(filename="", nb=0, started=True):
     if started:
         txtCurrentOperation.set("Watermarking : \"" + filename + "\"")
     text_counter.set("" + str(nb) + "/" + str(nbImageToEdit.get()))
-    txtButtonStart.set("Watermark " + str(nbImageToEdit.get()) + " images")
     if nbImageToEdit.get() > 0:
         progressbar_operation['value'] = nb * 100 / nbImageToEdit.get()
     Tk.update(window)
@@ -123,6 +126,8 @@ def filigrane(pathVar, pathOutVar, lgoVar):
 def updateOpacity(var):
     opacity.set(round(float(var) / float(100.0), 2))
 
+def updateSizeModifier(var):
+    sizeModifier.set(round(float(var) / float(100.0), 2))
 
 def browseFolder(var):
     if var == 1:
@@ -148,8 +153,10 @@ def browseFolder(var):
     if (os.path.isdir(folderInPath.get())) and os.path.isdir(folderOutPath.get()) and os.path.isfile(
             watermark_path.get()):
         button_start["state"] = "normal"
+        txtButtonStart.set("Watermark " + str(nbImageToEdit.get()) + " images")
     else:
         button_start["state"] = "disabled"
+        txtButtonStart.set("Select In/Out folders and watermark file")
 
 
 window = Tk()
@@ -216,7 +223,7 @@ opacity = DoubleVar()
 labelOpacity = ttk.Label(mainframe, text="Opacity")
 labelOpacity.grid(column=1, row=5, sticky=(E))
 # COL 2
-opacityScale = ttk.Scale(mainframe, from_=0, to=100, command=updateOpacity)
+opacityScale = ttk.Scale(mainframe, from_=1, to=100, command=updateOpacity)
 opacityScale.set(100)
 opacityScale.grid(column=2, row=5, sticky=(W, E))
 # COL 3
@@ -224,25 +231,39 @@ resultOpacity = ttk.Label(mainframe, textvariable=opacity)
 resultOpacity.grid(column=3, row=5, sticky=(W, E))
 
 # ROW 6
+sizeModifier = DoubleVar()
+# COL 1
+labelSizeModifier = ttk.Label(mainframe, text="Watermark size")
+labelSizeModifier.grid(column=1, row=6, sticky=(E))
+# COL 2
+sizeModifierScale = ttk.Scale(mainframe, from_=1, to=200, command=updateSizeModifier)
+sizeModifierScale.set(100)
+sizeModifierScale.grid(column=2, row=6, sticky=(W, E))
+# COL 3
+resultSizeModifier = ttk.Label(mainframe, textvariable=sizeModifier)
+resultSizeModifier.grid(column=3, row=6, sticky=(W, E))
+
+# ROW 7
 txtButtonStart = StringVar()
+txtButtonStart.set("Select In/Out folders and watermark file")
 # COL 2
 button_start = Button(mainframe, textvariable=txtButtonStart,
                       command=lambda: filigrane(folderInPath, folderOutPath, watermark_path), state="disabled")
-button_start.grid(column=2, row=6, sticky=(E, W))
+button_start.grid(column=2, row=7, sticky=(E, W))
 
-# ROW 7
+# ROW 8
 txtCurrentOperation = StringVar()
 text_counter = StringVar()
 # COL 1
 labelCounter = ttk.Label(mainframe, textvariable=text_counter)
-labelCounter.grid(column=1, row=7)
+labelCounter.grid(column=1, row=8)
 txtCurrentOperation.set("")
 label_current = ttk.Label(mainframe, textvariable=txtCurrentOperation)
-label_current.grid(column=2, columnspan=3, row=7, sticky=(E, W))
+label_current.grid(column=2, columnspan=3, row=8, sticky=(E, W))
 
-# ROW 7
+# ROW 9
 progressbar_operation = ttk.Progressbar(mainframe, orient="horizontal", mode="determinate")
-progressbar_operation.grid(columnspan=4, row=8, sticky=(E, W))
+progressbar_operation.grid(columnspan=4, row=9, sticky=(E, W))
 
 update_progression(started=False)
 
