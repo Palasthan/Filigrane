@@ -1,6 +1,6 @@
 ![Filigrane png](img/default_watermark.png)
 
-Filigrane is an software that allows you to put a watermark on a set of images. Filigrane is made with python3 and a Tkinter GUI
+Filigrane is a software that allows you to put a watermark on a set of images. Filigrane is made with python3 and a Tkinter GUI
 # Installation : 
 ## For users (Windows only):
 * Download latest release on https://github.com/Palasthan/Filigrane/releases
@@ -9,11 +9,13 @@ Filigrane is an software that allows you to put a watermark on a set of images. 
 
 ## For developers :
 * Clone/Fork directory
-* ``` pip install Pillow ```
-* Execute filigrane.pyw with python3
+* Install requiered libraries : 
+  * ``` pip install Pillow ```
+* Execute filigrane.pyw with python3 : 
+  * ``` python3 filigrane.pyw ```
 
 ### To bundle it in a .exe : 
-*  ```pyinstaller --add-data="img/*;img/" --icon=img\\filig.ico --clean .\filigrane.pyw```
+*  ``` pyinstaller --add-data="img/*;img/" --icon=img\\filig.ico --clean .\filigrane.pyw ```
 
 
 
