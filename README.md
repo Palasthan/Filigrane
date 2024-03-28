@@ -12,5 +12,9 @@ Filigrane is an software that allows you to put a watermark on a set of images. 
 * ``` pip install Pillow ```
 * Execute filigrane.pyw with python3
 
+### To bundle it in a .exe : 
+*  ```pyinstaller --add-data="img/*;img/" --icon=img\\filig.ico --clean .\filigrane.pyw```
+
+
 
 ![Screenshot png](img/screenshot.png)
