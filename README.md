@@ -15,7 +15,7 @@ Filigrane is a software that allows you to put a watermark on a set of images. F
   * ``` python3 filigrane.pyw ```
 
 ### To bundle it in a .exe : 
-*  ``` pyinstaller --add-data="img/*;img/" --icon=img\\filig.ico --clean .\filigrane.pyw ```
+*  Use the bundle.bat script
 
 
 
