@@ -2,5 +2,6 @@
 venv
 *.spec
 dist/
-images/
 build/
+installer-dist/
+.idea/
