@@ -1,5 +1,15 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.0"
+  #ifexist "VERSION"
+    #define _VersionFileHandle FileOpen("VERSION")
+    #if _VersionFileHandle
+      #define MyAppVersion FileRead(_VersionFileHandle)
+      #expr FileClose(_VersionFileHandle)
+    #else
+      #define MyAppVersion "1.0.0"
+    #endif
+  #else
+    #define MyAppVersion "1.0.0"
+  #endif
 #endif
 
 [Setup]

@@ -1,5 +1,5 @@
 param(
-  [string]$Version = "1.0.0",
+  [string]$Version = "",
   [switch]$Sign,
   [string]$CertPfx = "",
   [string]$CertPassword = "",
@@ -9,6 +9,20 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Get-ProjectVersion {
+  $versionFile = ".\VERSION"
+  if (-not (Test-Path $versionFile)) {
+    throw "Missing VERSION file at project root."
+  }
+
+  $value = (Get-Content -Raw $versionFile).Trim()
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    throw "VERSION file is empty."
+  }
+
+  return $value
+}
 
 function Find-InnoCompiler {
   $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue
@@ -114,6 +128,10 @@ function Invoke-CodeSign {
 
 Validate-SigningConfiguration
 
+if ([string]::IsNullOrWhiteSpace($Version)) {
+  $Version = Get-ProjectVersion
+}
+
 $appExe = ".\\dist\\Filigrane\\Filigrane.exe"
 $setupExe = ".\\installer-dist\\Filigrane-Setup-$Version.exe"
 
@@ -126,6 +144,7 @@ pyinstaller `
   --name Filigrane `
   --icon=img\filig.ico `
   --add-data "img;img" `
+  --add-data "VERSION;." `
   --collect-all PIL `
   --collect-all rawpy `
   --hidden-import PIL._tkinter_finder `

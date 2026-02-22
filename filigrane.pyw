@@ -5,11 +5,17 @@ import queue
 import hashlib
 import tempfile
 import math
+import json
+import re
+import sys
+import subprocess
+import urllib.request
+import urllib.error
 from collections import defaultdict
 from tkinter import *
 from tkinter import filedialog
 from tkinter import ttk
-from tkinter.messagebox import showerror, showinfo
+from tkinter.messagebox import showerror, showinfo, askyesno
 
 from PIL import Image, ImageOps, ImageTk, ImageSequence
 try:
@@ -46,6 +52,37 @@ PREVIEW_WORKERS = 2
 PREVIEW_PROXY_CACHE_DIR = os.path.join(tempfile.gettempdir(), "filigrane_preview_cache")
 GIF_PREVIEW_MAX_FRAMES = 20
 
+
+def get_runtime_base_dir():
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def load_app_version():
+    candidates = [
+        os.path.join(get_runtime_base_dir(), "VERSION"),
+        os.path.join(os.getcwd(), "VERSION"),
+    ]
+    for path in candidates:
+        try:
+            if os.path.isfile(path):
+                with open(path, "r", encoding="utf-8") as version_file:
+                    value = version_file.read().strip()
+                if value:
+                    return value
+        except Exception:
+            pass
+    return "0.0.0"
+
+
+APP_VERSION = load_app_version()
+GITHUB_RELEASES_URL = "https://github.com/Palasthan/Filigrane/releases"
+GITHUB_LATEST_RELEASE_API = "https://api.github.com/repos/Palasthan/Filigrane/releases/latest"
+UPDATE_CHECK_TIMEOUT_SECONDS = 8
+UPDATE_DOWNLOAD_TIMEOUT_SECONDS = 30
+UPDATE_USER_AGENT = f"Filigrane/{APP_VERSION}"
+
 # Initialize globals early because some Tk callbacks can fire during widget setup.
 selected_images = []
 preview_groups = []
@@ -67,6 +104,14 @@ preview_backfill_index = 0
 EXIF_ORIENTATION_TAG = 274
 export_events = queue.Queue()
 export_thread = None
+update_events = queue.Queue()
+update_check_thread = None
+update_download_thread = None
+update_check_started = False
+update_download_popup = None
+update_download_progress = None
+update_download_status = None
+pending_update_release = None
 
 
 def is_image_file(filename):
@@ -1697,6 +1742,301 @@ def update_import_popup_progress(current, total):
     import_popup.update()
 
 
+def parse_version_key(version_text):
+    if not version_text:
+        return ()
+    cleaned = str(version_text).strip()
+    if cleaned.lower().startswith("v"):
+        cleaned = cleaned[1:]
+    parts = re.findall(r"\d+|[A-Za-z]+", cleaned)
+    key = []
+    for part in parts:
+        if part.isdigit():
+            key.append((0, int(part)))
+        else:
+            key.append((1, part.lower()))
+    return tuple(key)
+
+
+def is_version_newer(candidate_version, current_version):
+    return parse_version_key(candidate_version) > parse_version_key(current_version)
+
+
+def github_get_json(url):
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": UPDATE_USER_AGENT,
+        },
+    )
+    with urllib.request.urlopen(request, timeout=UPDATE_CHECK_TIMEOUT_SECONDS) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def pick_release_installer_asset(release_data):
+    assets = release_data.get("assets") or []
+    if not assets:
+        return None
+
+    exe_assets = [a for a in assets if str(a.get("name", "")).lower().endswith(".exe")]
+    if not exe_assets:
+        return None
+
+    preferred = [a for a in exe_assets if "setup" in str(a.get("name", "")).lower()]
+    if preferred:
+        return preferred[0]
+    return exe_assets[0]
+
+
+def check_updates_worker():
+    try:
+        release = github_get_json(GITHUB_LATEST_RELEASE_API)
+        latest_version = (release.get("tag_name") or release.get("name") or "").strip()
+        if not latest_version:
+            update_events.put({"type": "check_error", "error": "Missing release version"})
+            return
+
+        if not is_version_newer(latest_version, APP_VERSION):
+            update_events.put({"type": "check_done", "available": False, "latest_version": latest_version})
+            return
+
+        asset = pick_release_installer_asset(release)
+        update_events.put(
+            {
+                "type": "check_done",
+                "available": True,
+                "current_version": APP_VERSION,
+                "latest_version": latest_version,
+                "release_name": release.get("name") or latest_version,
+                "release_url": release.get("html_url") or GITHUB_RELEASES_URL,
+                "release_body": release.get("body") or "",
+                "asset_name": asset.get("name") if asset else None,
+                "asset_url": asset.get("browser_download_url") if asset else None,
+            }
+        )
+    except Exception as exc:
+        update_events.put({"type": "check_error", "error": str(exc)})
+
+
+def format_bytes_count(byte_count):
+    value = float(max(0, int(byte_count)))
+    units = ["B", "KB", "MB", "GB"]
+    for unit in units:
+        if value < 1024.0 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024.0
+    return f"{int(byte_count)} B"
+
+
+def ensure_update_download_popup():
+    global update_download_popup, update_download_progress, update_download_status
+    if update_download_popup is not None and update_download_popup.winfo_exists():
+        return
+
+    update_download_popup = Toplevel(window)
+    update_download_popup.title("Update")
+    update_download_popup.transient(window)
+    update_download_popup.resizable(False, False)
+    update_download_popup.protocol("WM_DELETE_WINDOW", lambda: None)
+
+    ttk.Label(update_download_popup, text="Downloading update...\nPlease wait.").grid(column=1, row=1, padx=18, pady=(14, 8))
+    update_download_progress = ttk.Progressbar(update_download_popup, orient="horizontal", mode="indeterminate", length=320)
+    update_download_progress.grid(column=1, row=2, padx=18, pady=(0, 6), sticky=(W, E))
+    update_download_progress.start(25)
+    update_download_status = StringVar(value="")
+    ttk.Label(update_download_popup, textvariable=update_download_status).grid(column=1, row=3, padx=18, pady=(0, 12), sticky=(W, E))
+
+    update_download_popup.update_idletasks()
+    x = window.winfo_rootx() + max(0, (window.winfo_width() - update_download_popup.winfo_width()) // 2)
+    y = window.winfo_rooty() + max(0, (window.winfo_height() - update_download_popup.winfo_height()) // 2)
+    update_download_popup.geometry(f"+{x}+{y}")
+
+
+def hide_update_download_popup():
+    global update_download_popup, update_download_progress, update_download_status
+    if update_download_popup is not None and update_download_popup.winfo_exists():
+        try:
+            if update_download_progress is not None:
+                update_download_progress.stop()
+        except Exception:
+            pass
+        update_download_popup.destroy()
+    update_download_popup = None
+    update_download_progress = None
+    update_download_status = None
+
+
+def update_download_popup_progress(downloaded_bytes, total_bytes):
+    if update_download_popup is None or not update_download_popup.winfo_exists():
+        return
+    if update_download_progress is None:
+        return
+
+    if total_bytes and total_bytes > 0:
+        try:
+            update_download_progress.stop()
+        except Exception:
+            pass
+        update_download_progress.configure(mode="determinate", maximum=total_bytes, value=min(downloaded_bytes, total_bytes))
+        if update_download_status is not None:
+            update_download_status.set(f"{format_bytes_count(downloaded_bytes)} / {format_bytes_count(total_bytes)}")
+    else:
+        update_download_progress.configure(mode="indeterminate")
+        update_download_progress.start(25)
+        if update_download_status is not None:
+            update_download_status.set(format_bytes_count(downloaded_bytes))
+    update_download_popup.update_idletasks()
+
+
+def download_update_worker(asset_url, asset_name):
+    try:
+        os.makedirs(os.path.join(tempfile.gettempdir(), "filigrane_updates"), exist_ok=True)
+        safe_name = os.path.basename(asset_name or "Filigrane-Setup.exe")
+        dest_path = os.path.join(tempfile.gettempdir(), "filigrane_updates", safe_name)
+
+        request = urllib.request.Request(asset_url, headers={"User-Agent": UPDATE_USER_AGENT})
+        with urllib.request.urlopen(request, timeout=UPDATE_DOWNLOAD_TIMEOUT_SECONDS) as response, open(dest_path, "wb") as out_file:
+            total_bytes = 0
+            try:
+                total_bytes = int(response.headers.get("Content-Length") or 0)
+            except Exception:
+                total_bytes = 0
+
+            downloaded = 0
+            while True:
+                chunk = response.read(1024 * 128)
+                if not chunk:
+                    break
+                out_file.write(chunk)
+                downloaded += len(chunk)
+                update_events.put(
+                    {
+                        "type": "download_progress",
+                        "downloaded_bytes": downloaded,
+                        "total_bytes": total_bytes,
+                    }
+                )
+
+        update_events.put({"type": "download_done", "path": dest_path})
+    except Exception:
+        update_events.put({"type": "download_error", "trace": traceback.format_exc()})
+
+
+def launch_installer_and_close(installer_path):
+    try:
+        try:
+            subprocess.Popen([installer_path], cwd=os.path.dirname(installer_path) or None)
+        except Exception:
+            if hasattr(os, "startfile"):
+                os.startfile(installer_path)
+            else:
+                raise
+        showinfo(
+            "Update",
+            "The installer has been launched.\nFiligrane will now close so the update can proceed.",
+        )
+        window.after(200, on_app_close)
+    except Exception:
+        showerror(title="Update", message="Unable to launch the installer.\n\nTrace:\n" + traceback.format_exc())
+
+
+def prompt_update_available(release_info):
+    global pending_update_release
+    pending_update_release = release_info
+
+    latest_version = release_info.get("latest_version", "?")
+    current_version = release_info.get("current_version", APP_VERSION)
+    asset_name = release_info.get("asset_name")
+    release_url = release_info.get("release_url") or GITHUB_RELEASES_URL
+
+    if asset_name:
+        message = (
+            "A new version of Filigrane is available.\n\n"
+            f"Current version: {current_version}\n"
+            f"Available version: {latest_version}\n\n"
+            "Do you want to download and install it now?"
+        )
+    else:
+        message = (
+            "A new version of Filigrane is available, but no installer asset (.exe) was found on the release.\n\n"
+            f"Current version: {current_version}\n"
+            f"Available version: {latest_version}\n\n"
+            "Open the releases page now?"
+        )
+
+    if not askyesno("Update available", message):
+        pending_update_release = None
+        return
+
+    if not asset_name or not release_info.get("asset_url"):
+        try:
+            import webbrowser
+            webbrowser.open(release_url)
+        except Exception:
+            showerror(title="Update", message="Unable to open the releases page.\n" + release_url)
+        pending_update_release = None
+        return
+
+    ensure_update_download_popup()
+    if update_download_status is not None:
+        update_download_status.set("Starting download...")
+
+    global update_download_thread
+    update_download_thread = threading.Thread(
+        target=download_update_worker,
+        args=(release_info["asset_url"], asset_name),
+        daemon=True,
+    )
+    update_download_thread.start()
+
+
+def poll_update_events():
+    global update_check_thread, update_download_thread, pending_update_release
+
+    while True:
+        try:
+            event = update_events.get_nowait()
+        except queue.Empty:
+            break
+
+        etype = event.get("type")
+        if etype == "check_done":
+            update_check_thread = None
+            if event.get("available"):
+                prompt_update_available(event)
+        elif etype == "check_error":
+            update_check_thread = None
+            print("Update check failed:", event.get("error"))
+        elif etype == "download_progress":
+            update_download_popup_progress(event.get("downloaded_bytes", 0), event.get("total_bytes", 0))
+        elif etype == "download_done":
+            update_download_thread = None
+            hide_update_download_popup()
+            launch_installer_and_close(event.get("path"))
+            pending_update_release = None
+        elif etype == "download_error":
+            update_download_thread = None
+            hide_update_download_popup()
+            showerror(title="Update", message="Update download failed.\n\nTrace:\n" + event.get("trace", ""))
+            pending_update_release = None
+
+    if update_check_started:
+        window.after(250, poll_update_events)
+
+
+def start_background_update_check():
+    global update_check_started, update_check_thread
+    if update_check_started:
+        return
+    update_check_started = True
+    update_check_thread = threading.Thread(target=check_updates_worker, daemon=True)
+    update_check_thread.start()
+    window.after(250, poll_update_events)
+
+
 window = Tk()
 window.title("Watermark")
 window.config(background="white")
@@ -1909,6 +2249,7 @@ def on_app_close():
 start_preview_workers()
 process_preview_results()
 backfill_missing_previews()
+window.after(1200, start_background_update_check)
 window.protocol("WM_DELETE_WINDOW", on_app_close)
 
 window.mainloop()
